@@ -28,11 +28,15 @@ package net.runelite.client.rs;
 
 import com.google.common.base.Strings;
 import java.applet.Applet;
+import java.io.File;
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Map;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.swing.SwingUtilities;
+
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.client.RuneLiteProperties;
@@ -51,6 +55,7 @@ public class ClientLoader implements Supplier<Client>
 	private static final int NUM_ATTEMPTS = 6;
 
 	private final ClientConfigLoader clientConfigLoader;
+	private final ClientGamepackLoader gamepackLoader;
 	private final WorldSupplier worldSupplier;
 	private final RuntimeConfigLoader runtimeConfigLoader;
 	private final String javConfigUrl;
@@ -60,6 +65,7 @@ public class ClientLoader implements Supplier<Client>
 	public ClientLoader(OkHttpClient okHttpClient, RuntimeConfigLoader runtimeConfigLoader, String javConfigUrl)
 	{
 		this.clientConfigLoader = new ClientConfigLoader(okHttpClient);
+		this.gamepackLoader = new ClientGamepackLoader(okHttpClient);
 		this.worldSupplier = new WorldSupplier(okHttpClient);
 		this.runtimeConfigLoader = runtimeConfigLoader;
 		this.javConfigUrl = javConfigUrl;
@@ -186,18 +192,31 @@ public class ClientLoader implements Supplier<Client>
 		return backupConfig;
 	}
 
-	private Client loadClient(RSConfig config) throws ClassNotFoundException, IllegalAccessException, InstantiationException
-	{
+    private Client loadClient(RSConfig config) throws ClassNotFoundException, IllegalAccessException, InstantiationException, IOException {
+		File gamepack = downloadGamepack(config);
 		String initialClass = config.getInitialClass();
-		Class<?> clientClass = ClientLoader.class.getClassLoader()
-			.loadClass(initialClass);
 
+		ClassLoader cl = new URLClassLoader(new URL[] { gamepack.toURI().toURL() }, ClientLoader.class.getClassLoader());
+
+		Class<?> clientClass = cl.loadClass(initialClass);
 		Client rs = (Client) clientClass.newInstance();
 		((Applet) rs).setStub(new RSAppletStub(config, runtimeConfigLoader));
 
 		log.info("injected-client {}", rs.getBuildID());
 
 		return rs;
+	}
+
+	private File downloadGamepack(RSConfig config) throws IOException
+	{
+		HttpUrl url = HttpUrl.get(RuneLiteProperties.getGamepackBase() + config.getInitialJar());
+		File gamepack = gamepackLoader.fetch(url);
+
+		if(gamepack == null || !gamepack.exists()) {
+			throw new IOException("Unable to download gamepack");
+		}
+
+		return gamepack;
 	}
 
 	private static class OutageException extends RuntimeException

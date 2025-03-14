@@ -1,5 +1,4 @@
 /*
- * Copyright (c) 2019 Abex
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,67 +23,43 @@
  */
 package net.runelite.client.rs;
 
-import java.io.IOException;
-import java.util.ArrayDeque;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Queue;
-import java.util.Random;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import net.runelite.client.RuneLiteProperties;
-import net.runelite.http.api.worlds.World;
-import net.runelite.client.game.WorldClient;
-import net.runelite.http.api.worlds.WorldType;
+import lombok.AllArgsConstructor;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
-@Slf4j
-@RequiredArgsConstructor
-class WorldSupplier implements Supplier<World>
+import java.io.*;
+import java.nio.file.CopyOption;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+
+@AllArgsConstructor
+class ClientGamepackLoader
 {
 	private final OkHttpClient okHttpClient;
-	private final Random random = new Random(System.nanoTime());
-	private final Queue<World> worlds = new ArrayDeque<>();
 
-	@Override
-	public World get()
+	File fetch(HttpUrl url) throws IOException
 	{
-		if (!worlds.isEmpty())
+		final Request request = new Request.Builder()
+			.url(url)
+			.build();
+
+
+		try (Response response = okHttpClient.newCall(request).execute())
 		{
-			return worlds.poll();
+			if (!response.isSuccessful())
+			{
+				throw new IOException("Unsuccessful response: " + response.message());
+			}
+
+            if(response.body() != null) {
+				File tmp = File.createTempFile("client-gamepack", ".jar");
+				Files.copy(response.body().byteStream(), tmp.toPath(), StandardCopyOption.REPLACE_EXISTING);
+				return tmp;
+			}
 		}
 
-		try
-		{
-			List<World> newWorlds = new WorldClient(okHttpClient, HttpUrl.get(RuneLiteProperties.getApiBase()))
-				.lookupWorlds()
-				.getWorlds()
-				.stream()
-				.filter(w -> w.getTypes().isEmpty() || EnumSet.of(WorldType.MEMBERS).equals(w.getTypes()))
-				.collect(Collectors.toList());
-
-			Collections.shuffle(newWorlds, random);
-
-			worlds.addAll(newWorlds.subList(0, 16));
-		}
-		catch (IOException e)
-		{
-			log.warn("Unable to retrieve world list", e);
-		}
-
-		if (worlds.isEmpty())
-		{
-			World world = World.builder()
-				.id(301)
-				.address("127.0.0.1")
-				.build();
-			worlds.add(world);
-		}
-
-		return worlds.poll();
+		return null;
 	}
 }
